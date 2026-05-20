@@ -299,9 +299,9 @@ export default function AdminDashboard() {
     refresh();
   }, []);
 
-  const displayedUsers = useMemo(() => pickDashboardDataset(users, DEMO_USERS, 8), [users]);
-  const displayedApplications = useMemo(() => pickDashboardDataset(applications, DEMO_APPLICATIONS, 4), [applications]);
-  const displayedBookings = useMemo(() => pickDashboardDataset(bookings, DEMO_BOOKINGS, 6), [bookings]);
+  const displayedUsers = useMemo(() => pickDashboardDataset(users, DEMO_USERS, 1), [users]);
+  const displayedApplications = useMemo(() => pickDashboardDataset(applications, DEMO_APPLICATIONS, 1), [applications]);
+  const displayedBookings = useMemo(() => pickDashboardDataset(bookings, DEMO_BOOKINGS, 1), [bookings]);
 
   const updateApplicationStatus = async (app, nextStatus) => {
     try {
