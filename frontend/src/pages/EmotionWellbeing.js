@@ -346,6 +346,7 @@ const EMOTIONS = [
 
 const REPORT_COLLECTION_PRIMARY = "emotional_wellbeing_reports";
 const REPORT_COLLECTION_LEGACY = "mental_health_reports";
+const SCAN_DURATION_SECONDS = 30;
 
 function normalizeStepKey(step) {
   if (step === "patient" || step === "patient-info") return "info";
@@ -685,7 +686,7 @@ export default function EmotionWellbeing() {
   const [cameraReady, setCameraReady] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanStarted, setScanStarted] = useState(false);
-  const [countdown, setCountdown] = useState(60);
+  const [countdown, setCountdown] = useState(SCAN_DURATION_SECONDS);
 
   const [scanResult, setScanResult] = useState(restoreData.scanResult || null);
 
@@ -1067,7 +1068,7 @@ export default function EmotionWellbeing() {
     setCameraReady(false);
     setScanning(false);
     setScanStarted(false);
-    setCountdown(60);
+    setCountdown(SCAN_DURATION_SECONDS);
     isScanningRef.current = false;
     finalizingScanRef.current = false;
     liveRequestRef.current = 0;
@@ -1134,7 +1135,7 @@ export default function EmotionWellbeing() {
       setScanning(true);
       isScanningRef.current = true;
       setScanStarted(true);
-      setCountdown(60);
+      setCountdown(SCAN_DURATION_SECONDS);
 
       const startTime = Date.now();
 
@@ -1143,11 +1144,11 @@ export default function EmotionWellbeing() {
         detectEmotion(); // send frame to DeepFace
 
         const elapsed = Math.floor((Date.now() - startTime) / 1000);
-        const remaining = 60 - elapsed;
+        const remaining = SCAN_DURATION_SECONDS - elapsed;
 
         setCountdown(remaining > 0 ? remaining : 0);
 
-        if (elapsed >= 60) {
+        if (elapsed >= SCAN_DURATION_SECONDS) {
           stopScan();
         }
 
@@ -1218,7 +1219,7 @@ export default function EmotionWellbeing() {
     setScanning(true);
     isScanningRef.current = true;
     setScanStarted(true);
-    setCountdown(60);
+    setCountdown(SCAN_DURATION_SECONDS);
 
     const startTime = Date.now();
     intervalRef.current = setInterval(() => {
@@ -1229,10 +1230,10 @@ export default function EmotionWellbeing() {
 
       detectEmotion();
       const elapsed = Math.floor((Date.now() - startTime) / 1000);
-      const remaining = 60 - elapsed;
+      const remaining = SCAN_DURATION_SECONDS - elapsed;
       setCountdown(remaining > 0 ? remaining : 0);
 
-      if (elapsed >= 60) {
+      if (elapsed >= SCAN_DURATION_SECONDS) {
         stopScan();
       }
     }, 1000);
@@ -1708,7 +1709,7 @@ export default function EmotionWellbeing() {
     Number(age) <= 100;
   const surveyAnsweredCount = scores.filter((s) => Number.isFinite(s)).length;
   const surveyProgressPct = Math.round((surveyAnsweredCount / QUESTIONS.length) * 100);
-  const scanProgressPct = ((60 - countdown) / 60) * 100;
+  const scanProgressPct = ((SCAN_DURATION_SECONDS - countdown) / SCAN_DURATION_SECONDS) * 100;
   const allSurveyAnswered = surveyAnsweredCount === QUESTIONS.length;
 
   return (
@@ -1993,7 +1994,7 @@ export default function EmotionWellbeing() {
                         <div className="min-w-0">
                           <h3 className="font-semibold text-foreground mb-1">Ready to Scan</h3>
                           <p className="text-sm text-muted-foreground max-w-xs">
-                            The AI will analyze your facial expressions and voice tone for 60 seconds to evaluate your emotional state.
+                            The AI will analyze your facial expressions and voice tone for {SCAN_DURATION_SECONDS} seconds to evaluate your emotional state.
                           </p>
                         </div>
                         <div className="flex gap-3 text-xs text-muted-foreground">
