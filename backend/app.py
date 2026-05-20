@@ -76,6 +76,7 @@ LAST_FACE_DETECTED = False
 
 PROCESS_INTERVAL = 0.0  # analyze each request; do not reuse prior frame emotion
 MIN_FRAMES_REQUIRED = 3
+FRAME_VOTE_SIZE = 10
 VOICE_PIPELINE = None
 VOICE_PIPELINE_ERROR = None
 RAZORPAY_API_BASE = "https://api.razorpay.com/v1"
@@ -104,7 +105,7 @@ def ensure_emotion_dependencies():
 
         mp_face_detection = mp.solutions.face_detection
         face_detector = mp_face_detection.FaceDetection(
-            model_selection=0, min_detection_confidence=0.35
+            model_selection=0, min_detection_confidence=0.2
         )
 
         print("Loading model...")
@@ -285,24 +286,116 @@ def detect_stress(emotions):
 # EMOTION STABILITY
 # ============================================
 
+def classify_facial_emotion(emotions):
+    happy = float(emotions.get("happy", 0))
+    sad = float(emotions.get("sad", 0))
+    angry = float(emotions.get("angry", 0))
+    fear = float(emotions.get("fear", 0))
+    disgust = float(emotions.get("disgust", 0))
+    neutral = float(emotions.get("neutral", 0))
+    surprise = float(emotions.get("surprise", 0))
+
+    negative_mix = (sad * 0.48) + (fear * 0.28) + (disgust * 0.14) + (angry * 0.10)
+    stress_score = (sad + angry + fear + disgust) / 4
+    dominant = max(
+        {
+            "Happy": happy,
+            "Neutral": neutral,
+            "Sad": sad,
+            "Angry": angry,
+            "Fear": fear,
+            "Disgust": disgust,
+            "Surprise": surprise,
+        },
+        key=lambda key: {
+            "Happy": happy,
+            "Neutral": neutral,
+            "Sad": sad,
+            "Angry": angry,
+            "Fear": fear,
+            "Disgust": disgust,
+            "Surprise": surprise,
+        }[key],
+    )
+
+    # Smile signals are often split between happy and neutral, so do not require
+    # "happy" to completely dominate neutral before calling it happy.
+    if happy >= 24 and happy >= sad + 6 and happy >= angry + 8 and happy >= fear + 8:
+        return "Happy", happy
+
+    if happy >= 18 and neutral >= 30 and happy >= sad + 10 and happy >= angry + 10:
+        return "Happy", max(happy, (happy + neutral) / 2)
+
+    if angry >= 34 or (angry + disgust >= 56 and angry >= sad - 8):
+        return "Angry", max(angry, (angry + disgust) / 2)
+
+    # "Depressed" is not a direct DeepFace class. Treat it as a heavier sad/fear
+    # mixture only when positive and neutral signals are clearly lower.
+    if negative_mix >= 42 and sad >= 28 and fear >= 10 and happy < 22 and neutral < 48:
+        return "Depressed", negative_mix
+
+    if sad >= 48 and sad >= happy + 14 and sad >= neutral + 4:
+        return "Sad", sad
+
+    if stress_score >= 45 and max(sad, angry, fear, disgust) >= 34:
+        return "Stressed", stress_score
+
+    if neutral >= 34 and neutral >= sad - 8 and happy < 24:
+        return "Neutral", neutral
+
+    if dominant == "Happy":
+        return "Happy", happy
+    if dominant == "Sad":
+        return ("Sad", sad) if sad >= 58 and happy < 20 else ("Neutral", max(neutral, sad))
+    if dominant == "Angry":
+        return "Angry", angry
+    if dominant in {"Fear", "Disgust"} and negative_mix >= 45:
+        return "Depressed", negative_mix
+
+    return "Neutral", max(neutral, happy, sad, angry, fear, disgust, surprise)
+
+
 def get_stable_emotion(current_emotion, confidence):
     global LAST_EMOTION, LAST_CONFIDENCE
 
-    if current_emotion != LAST_EMOTION:
+    FRAME_HISTORY.append({
+        "emotion": current_emotion,
+        "confidence": float(confidence or 0),
+    })
+
+    if len(FRAME_HISTORY) < MIN_FRAMES_REQUIRED:
         LAST_EMOTION = current_emotion
-        LAST_CONFIDENCE = confidence
-        FRAME_HISTORY.clear()
-        return current_emotion, confidence
+        LAST_CONFIDENCE = round(float(confidence or 0), 2)
+        return LAST_EMOTION, LAST_CONFIDENCE
 
-    FRAME_HISTORY.append(current_emotion)
+    counts = Counter(item["emotion"] for item in FRAME_HISTORY)
+    history_size = len(FRAME_HISTORY)
+    majority_threshold = 7 if history_size >= FRAME_VOTE_SIZE else max(2, int(history_size * 0.6))
 
-    counts = Counter(FRAME_HISTORY)
-    dominant, _ = counts.most_common(1)[0]
+    dominant, dominant_count = counts.most_common(1)[0]
+
+    if counts.get("Happy", 0) >= majority_threshold:
+        dominant = "Happy"
+    elif counts.get("Neutral", 0) >= majority_threshold:
+        dominant = "Neutral"
+    elif counts.get("Sad", 0) + counts.get("Depressed", 0) >= majority_threshold:
+        dominant = "Depressed" if counts.get("Depressed", 0) >= counts.get("Sad", 0) else "Sad"
+    elif dominant_count < majority_threshold and LAST_EMOTION not in {"No Face Detected", "Unavailable"}:
+        dominant = LAST_EMOTION
+
+    matching_confidences = [
+        item["confidence"] for item in FRAME_HISTORY if item["emotion"] == dominant
+    ]
+    confidence_value = (
+        sum(matching_confidences) / len(matching_confidences)
+        if matching_confidences
+        else float(confidence or 0)
+    )
 
     LAST_EMOTION = dominant
-    LAST_CONFIDENCE = confidence
+    LAST_CONFIDENCE = round(float(confidence_value), 2)
 
-    return dominant, confidence
+    return dominant, LAST_CONFIDENCE
 
 
 def load_voice_pipeline():
@@ -581,9 +674,6 @@ def live_emotion():
         img = decode_image(data.get("image"))
 
         if img is None:
-            LAST_FACE_DETECTED = False
-            LAST_EMOTION = "No Face Detected"
-            LAST_CONFIDENCE = 0
             return jsonify({
                 "emotion": "No Face Detected",
                 "confidence": 0,
@@ -596,12 +686,9 @@ def live_emotion():
         analysis_frame = face if face_detected else build_emotion_fallback_frame(img)
 
         if analysis_frame is None:
-            LAST_FACE_DETECTED = False
-            LAST_EMOTION = "No Face Detected"
-            LAST_CONFIDENCE = 0
             return jsonify({
-                "emotion": "No Face Detected",
-                "confidence": 0,
+                "emotion": LAST_EMOTION if LAST_EMOTION != "No Face Detected" else "Neutral",
+                "confidence": LAST_CONFIDENCE,
                 "face_detected": False,
             })
 
@@ -620,88 +707,27 @@ def live_emotion():
             result = result[0]
 
         emotions = result["emotion"]
-        dominant = result["dominant_emotion"]
-        confidence = emotions[dominant]
-
-        # ============================================
-        # BALANCED EMOTION LOGIC
-        # ============================================
-
-        happy = emotions.get("happy", 0)
-        sad = emotions.get("sad", 0)
-        angry = emotions.get("angry", 0)
-        fear = emotions.get("fear", 0)
-        disgust = emotions.get("disgust", 0)
-        neutral = emotions.get("neutral", 0)
-
-        stress_score = (sad + angry + fear + disgust) / 4
-
-        # Prefer clear positive expressions before falling into negative buckets.
-        if (
-            happy >= 22
-            and happy >= sad
-            and happy >= angry + 4
-            and happy >= fear + 4
-            and happy >= neutral - 8
-        ):
-            emotion = "Happy"
-            confidence = happy
-
-        # Strong angry / frustration signals.
-        elif angry >= 28 or (angry + disgust >= 48):
-            emotion = "Angry"
-            confidence = angry
-
-        elif neutral >= 38 and neutral >= sad - 4:
-            emotion = "Neutral"
-            confidence = neutral
-
-        # Only call it sad when sadness very clearly dominates the frame.
-        elif sad >= 60 and sad >= happy + 18 and sad >= neutral + 14:
-            emotion = "Sad"
-            confidence = sad
-
-        # Stressed should be reserved for strong negative mixtures, not slight sadness.
-        elif stress_score >= 42 and max(sad, angry, fear, disgust) >= 36:
-            emotion = "Stressed"
-            confidence = stress_score
-
-        else:
-            if dominant == "happy":
-                emotion = "Happy"
-                confidence = happy
-            elif dominant == "neutral":
-                emotion = "Neutral"
-                confidence = neutral
-            elif dominant == "sad":
-                emotion = "Neutral" if sad < 70 else "Sad"
-                confidence = neutral if sad < 70 else sad
-            elif dominant == "angry":
-                emotion = "Angry"
-                confidence = angry
-            else:
-                emotion = "Neutral"
-                confidence = neutral
+        emotion, confidence = classify_facial_emotion(emotions)
+        stable_emotion, stable_confidence = get_stable_emotion(emotion, confidence)
 
         LAST_FACE_DETECTED = face_detected
-        LAST_EMOTION = emotion
-        LAST_CONFIDENCE = round(float(confidence), 2)
+        LAST_EMOTION = stable_emotion
+        LAST_CONFIDENCE = round(float(stable_confidence), 2)
 
         return jsonify({
-            "emotion": emotion,
+            "emotion": stable_emotion,
             "confidence": LAST_CONFIDENCE,
             "face_detected": face_detected,
+            "frames_analyzed": len(FRAME_HISTORY),
+            "frame_votes": dict(Counter(item["emotion"] for item in FRAME_HISTORY)),
         })
 
     except Exception as e:
         print("ERROR:", e)
-        LAST_FACE_DETECTED = False
-        LAST_EMOTION = "No Face Detected"
-        LAST_CONFIDENCE = 0
 
     return jsonify({
-        "emotion": "No Face Detected",
-        "confidence": 0,
+        "emotion": LAST_EMOTION if LAST_EMOTION != "No Face Detected" else "Neutral",
+        "confidence": LAST_CONFIDENCE,
         "face_detected": False,
     })
 

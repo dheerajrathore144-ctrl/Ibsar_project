@@ -542,8 +542,11 @@ function getStabilityPercent(stabilityScore) {
 }
 
 function getStressRisk(emotion, avgScore) {
-  if (emotion === "Angry" || emotion === "Frustrated")
+  if (["Angry", "Frustrated", "Depressed", "Stressed"].includes(emotion))
     return { label: "High", color: "text-[#dd5b42]" };
+
+  if (emotion === "Sad")
+    return { label: "Moderate", color: "text-[#d99a17]" };
 
   if (avgScore > 7)
     return { label: "Moderate", color: "text-[#d99a17]" };
