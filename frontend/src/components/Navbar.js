@@ -132,7 +132,7 @@ function AuthModal({ closeModal, darkMode }) {
     if (code.includes("user-not-found")) return "No account found for this email.";
     if (code.includes("email-already-in-use")) return "Email already in use.";
     if (code.includes("weak-password")) return "Password should be at least 6 characters.";
-    if (code.includes("configuration-not-found")) return "Firebase auth is not fully configured. Use test admin login: admin@emowellbeing.test / Admin@12345.";
+    if (code.includes("configuration-not-found")) return "Email login is not fully configured. Use test admin login: admin@emowellbeing.test / Admin@12345.";
     return err?.message || "Authentication failed.";
   };
 

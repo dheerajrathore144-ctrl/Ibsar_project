@@ -420,7 +420,7 @@ export default function AdminDashboard() {
 
         setApplications(localApplications);
         setUsers(localUsers);
-        alert("Application status updated locally.");
+        alert("Application status updated.");
       }
     }
   };

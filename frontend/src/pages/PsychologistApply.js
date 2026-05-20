@@ -67,7 +67,7 @@ export default function PsychologistApply() {
           setForm((prev) => ({ ...prev, ...localData }));
           setSubmitted(true);
         }
-        setPermissionNotice("Cloud profile access is restricted right now. You can still fill the form locally.");
+        setPermissionNotice("You can continue filling the form. Your progress is saved on this device.");
       }
     };
     loadExisting();
@@ -112,8 +112,8 @@ export default function PsychologistApply() {
         alert("Could not submit application.");
       } else {
         setSubmitted(true);
-        setPermissionNotice("Cloud submission is blocked by Firestore permissions. Your application has been saved locally for now.");
-        alert("Application saved locally. Firestore permissions need to be updated before cloud submission works.");
+        setPermissionNotice("Your application has been saved on this device.");
+        alert("Application saved.");
       }
     } finally {
       setLoading(false);

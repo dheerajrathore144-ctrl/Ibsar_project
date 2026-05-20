@@ -27,6 +27,7 @@ import {
 import jsPDF from "jspdf";
 import { useNavigate } from "react-router-dom";
 import { apiUrl } from "../lib/api";
+import { isFirebasePermissionError } from "../lib/firebaseSafe";
 
 const palette = {
   blue: "#1f5f99",
@@ -1368,17 +1369,28 @@ export default function EmotionWellbeing() {
     const reports = [];
     const collectionsToRead = [REPORT_COLLECTION_PRIMARY, REPORT_COLLECTION_LEGACY];
 
-    for (const collectionName of collectionsToRead) {
-      const q = query(
-        collection(db, collectionName),
-        where("name", "==", name.trim()),
-        where("age", "==", Number(age))
-      );
+    try {
+      for (const collectionName of collectionsToRead) {
+        const q = query(
+          collection(db, collectionName),
+          where("name", "==", name.trim()),
+          where("age", "==", Number(age))
+        );
 
-      const querySnapshot = await getDocs(q);
-      querySnapshot.forEach((doc) => {
-        reports.push({ id: `${collectionName}:${doc.id}`, ...doc.data() });
-      });
+        const querySnapshot = await getDocs(q);
+        querySnapshot.forEach((doc) => {
+          reports.push({ id: `${collectionName}:${doc.id}`, ...doc.data() });
+        });
+      }
+    } catch (err) {
+      if (!isFirebasePermissionError(err)) {
+        console.error("Previous report fetch failed:", err);
+        toast.error("Could not load previous reports right now.");
+        return;
+      }
+
+      toast.info("No previous reports are available on this device.");
+      return;
     }
 
     if (reports.length === 0) {

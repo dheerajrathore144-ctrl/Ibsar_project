@@ -152,7 +152,7 @@ const upsertUserProfile = async (userLike) => {
       throw err;
     }
 
-    console.warn("Firestore profile access denied. Using local fallback profile.", err);
+    console.warn("Profile access was restricted. Using local fallback profile.", err);
     const fallbackProfile = readLocalProfile(userLike.uid) || buildFallbackProfile(userLike);
     saveLocalProfile(fallbackProfile);
     return fallbackProfile;

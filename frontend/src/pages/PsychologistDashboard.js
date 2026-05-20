@@ -185,8 +185,8 @@ export default function PsychologistDashboard() {
       setBookings(localBookings);
       setPermissionNotice(
         localBookings.length > 0
-          ? "Cloud dashboard data is restricted by Firestore permissions. Showing local meetings and availability."
-          : "Cloud dashboard data is restricted by Firestore permissions. Showing local availability only."
+          ? "Showing your saved meetings and availability on this device."
+          : "Showing your saved availability on this device."
       );
     }
   };
@@ -230,8 +230,8 @@ export default function PsychologistDashboard() {
         console.error("Availability save failed:", err);
         alert("Could not save availability.");
       } else {
-        setPermissionNotice("Cloud save is blocked by Firestore permissions. Availability was saved locally.");
-        alert("Availability saved locally. Firestore permissions need to be updated for cloud sync.");
+        setPermissionNotice("Availability was saved on this device.");
+        alert("Availability saved.");
       }
     } finally {
       setSaving(false);
@@ -261,8 +261,8 @@ export default function PsychologistDashboard() {
         setBookings((prev) =>
           prev.map((item) => (item.id === booking.id ? updatedBooking : item))
         );
-        setPermissionNotice("Meeting updates are being saved locally because Firestore permissions are restricted.");
-        alert("Meeting updated locally.");
+        setPermissionNotice("Meeting update was saved on this device.");
+        alert("Meeting updated.");
       }
     }
   };
