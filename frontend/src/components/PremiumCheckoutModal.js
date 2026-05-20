@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   CheckCircle2,
@@ -131,19 +131,7 @@ export default function PremiumCheckoutModal({
     setError("");
   }, [customerName, open]);
 
-  useEffect(() => {
-    if (!open || !autoStart || checkoutMode !== "razorpay") return;
-
-    const timer = window.setTimeout(() => {
-      handleConfirm();
-    }, 150);
-
-    return () => window.clearTimeout(timer);
-  }, [autoStart, checkoutMode, open]);
-
-  if (!open) return null;
-
-  const validate = () => {
+  const validate = useCallback(() => {
     if (checkoutMode === "instant") {
       setError("");
       return true;
@@ -161,9 +149,9 @@ export default function PremiumCheckoutModal({
 
     setError("");
     return true;
-  };
+  }, [checkoutMode, customerEmail, resolvedAmountValue]);
 
-  const handleConfirm = async () => {
+  const handleConfirm = useCallback(async () => {
     if (!validate()) return;
 
     setProcessing(true);
@@ -296,7 +284,33 @@ export default function PremiumCheckoutModal({
     } finally {
       setProcessing(false);
     }
-  };
+  }, [
+    checkoutMode,
+    currency,
+    customerEmail,
+    customerName,
+    description,
+    notes,
+    onConfirm,
+    payerName,
+    phone,
+    receiptPrefix,
+    resolvedAmountValue,
+    title,
+    validate,
+  ]);
+
+  useEffect(() => {
+    if (!open || !autoStart || checkoutMode !== "razorpay") return;
+
+    const timer = window.setTimeout(() => {
+      handleConfirm();
+    }, 150);
+
+    return () => window.clearTimeout(timer);
+  }, [autoStart, checkoutMode, handleConfirm, open]);
+
+  if (!open) return null;
 
   return (
     <div className="fixed inset-0 z-[1200] overflow-y-auto bg-[#0f172a]/62 p-4 backdrop-blur-md">
