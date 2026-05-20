@@ -348,6 +348,7 @@ const EMOTIONS = [
 const REPORT_COLLECTION_PRIMARY = "emotional_wellbeing_reports";
 const REPORT_COLLECTION_LEGACY = "mental_health_reports";
 const SCAN_DURATION_SECONDS = 30;
+const LOCAL_REPORTS_KEY = "melomind_emotional_wellbeing_reports";
 
 function normalizeStepKey(step) {
   if (step === "patient" || step === "patient-info") return "info";
@@ -568,6 +569,45 @@ function normalizeSurveyScores(rawScores) {
 function normalizeSurveyQuestions(rawQuestions) {
   if (!Array.isArray(rawQuestions) || rawQuestions.length === 0) return QUESTIONS;
   return rawQuestions.slice(0, QUESTIONS.length);
+}
+
+function normalizeReportLookupName(value) {
+  return String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function readLocalReports() {
+  try {
+    const raw = localStorage.getItem(LOCAL_REPORTS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalReport(report) {
+  try {
+    const reports = readLocalReports();
+    const nextReport = {
+      ...report,
+      id: report.id || `local:${Date.now()}`,
+      savedLocallyAt: new Date().toISOString(),
+    };
+    const nextReports = [nextReport, ...reports].slice(0, 30);
+    localStorage.setItem(LOCAL_REPORTS_KEY, JSON.stringify(nextReports));
+    return nextReport;
+  } catch {
+    return report;
+  }
+}
+
+function findLocalReports(nameValue, ageValue) {
+  const lookupName = normalizeReportLookupName(nameValue);
+  const lookupAge = Number(ageValue);
+
+  return readLocalReports().filter((report) => (
+    normalizeReportLookupName(report.name) === lookupName &&
+    Number(report.age) === lookupAge
+  ));
 }
 
 function getInsight(name, emotion, avgScore, stressScore, depressionLevel, stabilityScore) {
@@ -1328,6 +1368,7 @@ export default function EmotionWellbeing() {
         voiceSentiment,
       };
 
+      saveLocalReport(report);
       await addDoc(collection(db, REPORT_COLLECTION_PRIMARY), report);
     };
 
@@ -1343,13 +1384,15 @@ export default function EmotionWellbeing() {
         },
       });
       try {
-        await addDoc(collection(db, REPORT_COLLECTION_PRIMARY), {
+        const fallbackReport = {
           ...baseReport,
           voiceSentiment: {
             tone: "Neutral",
             confidence: 0,
           },
-        });
+        };
+        saveLocalReport(fallbackReport);
+        await addDoc(collection(db, REPORT_COLLECTION_PRIMARY), fallbackReport);
       } catch (saveErr) {
         console.error("Report save fallback error:", saveErr);
       }
@@ -1366,7 +1409,7 @@ export default function EmotionWellbeing() {
       return;
     }
 
-    const reports = [];
+    const reports = findLocalReports(name, age);
     const collectionsToRead = [REPORT_COLLECTION_PRIMARY, REPORT_COLLECTION_LEGACY];
 
     try {
@@ -1389,8 +1432,10 @@ export default function EmotionWellbeing() {
         return;
       }
 
-      toast.info("No previous reports are available on this device.");
-      return;
+      if (reports.length === 0) {
+        toast.info("No previous reports are available on this device.");
+        return;
+      }
     }
 
     if (reports.length === 0) {
@@ -1398,9 +1443,18 @@ export default function EmotionWellbeing() {
       return;
     }
 
-    reports.sort((a, b) => new Date(b.date) - new Date(a.date));
+    const uniqueReports = Array.from(
+      new Map(
+        reports.map((report) => [
+          `${normalizeReportLookupName(report.name)}-${Number(report.age)}-${report.date}`,
+          report,
+        ])
+      ).values()
+    );
 
-    setPreviousReports(reports);
+    uniqueReports.sort((a, b) => new Date(b.date) - new Date(a.date));
+
+    setPreviousReports(uniqueReports);
     setShowReportsPopup(true);
   };
   /* ---------- Report helpers ---------- */
