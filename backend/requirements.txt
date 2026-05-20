@@ -1,0 +1,13 @@
+flask
+flask-cors
+flask-sqlalchemy
+flask-jwt-extended
+werkzeug
+numpy
+opencv-python
+mediapipe
+deepface
+transformers
+torch
+librosa
+soundfile
