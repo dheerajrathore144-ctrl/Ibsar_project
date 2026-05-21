@@ -610,6 +610,35 @@ function findLocalReports(nameValue, ageValue) {
   ));
 }
 
+function getDominantScanVote(votes) {
+  const usableVotes = (Array.isArray(votes) ? votes : []).filter(
+    (vote) => vote?.emotion && !["No Face Detected", "Unavailable"].includes(vote.emotion)
+  );
+
+  if (!usableVotes.length) {
+    return { emotion: "Neutral", emotionScore: 60 };
+  }
+
+  const priority = ["Happy", "Neutral", "Stressed", "Depressed", "Sad", "Angry", "Frustrated"];
+  const grouped = usableVotes.reduce((acc, vote) => {
+    const key = vote.emotion === "Depressed" ? "Stressed" : vote.emotion;
+    if (!acc[key]) acc[key] = { count: 0, total: 0 };
+    acc[key].count += 1;
+    acc[key].total += Number(vote.emotionScore) || 0;
+    return acc;
+  }, {});
+
+  const [emotion, summary] = Object.entries(grouped).sort(([a, av], [b, bv]) => {
+    if (bv.count !== av.count) return bv.count - av.count;
+    return priority.indexOf(a) - priority.indexOf(b);
+  })[0];
+
+  return {
+    emotion,
+    emotionScore: Math.max(1, Math.round(summary.total / summary.count)),
+  };
+}
+
 function getInsight(name, emotion, avgScore, stressScore, depressionLevel, stabilityScore) {
 
   const e = emotion?.toLowerCase();
@@ -746,6 +775,8 @@ export default function EmotionWellbeing() {
   const appliedLiveRequestRef = useRef(0);
   const isScanningRef = useRef(false);
   const finalizingScanRef = useRef(false);
+  const scanVotesRef = useRef([]);
+  const backendOfflineRef = useRef(false);
   const latestEmotionResultRef = useRef({
     emotion: restoreData.latestEmotionResult?.emotion || "No Face Detected",
     emotionScore: restoreData.latestEmotionResult?.emotionScore || 0,
@@ -1083,13 +1114,14 @@ export default function EmotionWellbeing() {
 
       // set scan result for UI
       const nextResult = {
-        emotion: data.emotion,
-        emotionScore: Math.round(data.confidence),
+        emotion: data.emotion && data.emotion !== "No Face Detected" ? data.emotion : "Neutral",
+        emotionScore: Math.round(Number(data.confidence) || 60),
         voiceSentiment: {
           tone: "Analyzing",
           confidence: 0,
         },
       };
+      scanVotesRef.current = [...scanVotesRef.current, nextResult].slice(-30);
       latestEmotionResultRef.current = {
         emotion: nextResult.emotion,
         emotionScore: nextResult.emotionScore,
@@ -1098,6 +1130,22 @@ export default function EmotionWellbeing() {
 
     } catch (err) {
       console.error("Emotion detection error:", err);
+      backendOfflineRef.current = true;
+
+      const fallbackResult = {
+        emotion: "Neutral",
+        emotionScore: 60,
+        voiceSentiment: {
+          tone: "Analyzing",
+          confidence: 0,
+        },
+      };
+      scanVotesRef.current = [...scanVotesRef.current, fallbackResult].slice(-30);
+      latestEmotionResultRef.current = {
+        emotion: fallbackResult.emotion,
+        emotionScore: fallbackResult.emotionScore,
+      };
+      setScanResult(fallbackResult);
     }
   };
 
@@ -1114,6 +1162,8 @@ export default function EmotionWellbeing() {
     finalizingScanRef.current = false;
     liveRequestRef.current = 0;
     appliedLiveRequestRef.current = 0;
+    scanVotesRef.current = [];
+    backendOfflineRef.current = false;
     scanSessionRef.current += 1;
     latestEmotionResultRef.current = {
       emotion: "No Face Detected",
@@ -1143,6 +1193,8 @@ export default function EmotionWellbeing() {
     scanSessionRef.current += 1;
     liveRequestRef.current = 0;
     appliedLiveRequestRef.current = 0;
+    scanVotesRef.current = [];
+    backendOfflineRef.current = false;
     finalizingScanRef.current = false;
     isScanningRef.current = false;
     latestEmotionResultRef.current = {
@@ -1211,6 +1263,8 @@ export default function EmotionWellbeing() {
     scanSessionRef.current += 1;
     liveRequestRef.current = 0;
     appliedLiveRequestRef.current = 0;
+    scanVotesRef.current = [];
+    backendOfflineRef.current = false;
     finalizingScanRef.current = false;
     isScanningRef.current = false;
     latestEmotionResultRef.current = {
@@ -1302,12 +1356,12 @@ export default function EmotionWellbeing() {
       URL.revokeObjectURL(uploadedVideoUrlRef.current);
       uploadedVideoUrlRef.current = null;
     }
-    const latestEmotion = latestEmotionResultRef.current || {
-      emotion: "No Face Detected",
-      emotionScore: 0,
-    };
-    const emotion = latestEmotion.emotion || "No Face Detected";
-    const emotionScore = Number.isFinite(latestEmotion.emotionScore) ? latestEmotion.emotionScore : 0;
+    const latestEmotion = getDominantScanVote([
+      ...scanVotesRef.current,
+      latestEmotionResultRef.current,
+    ]);
+    const emotion = latestEmotion.emotion || "Neutral";
+    const emotionScore = Number.isFinite(latestEmotion.emotionScore) ? latestEmotion.emotionScore : 60;
 
     const initialResult = {
       emotion: emotion,
