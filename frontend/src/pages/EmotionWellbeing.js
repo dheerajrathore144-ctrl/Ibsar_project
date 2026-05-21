@@ -338,16 +338,14 @@ const QUESTIONS = [
 
 const EMOTIONS = [
   "Happy",
-  "Sad",
-  "Angry",
-  "Frustrated",
   "Neutral",
-  "Depressed",
+  "Stressed",
 ];
 
 const REPORT_COLLECTION_PRIMARY = "emotional_wellbeing_reports";
 const REPORT_COLLECTION_LEGACY = "mental_health_reports";
 const SCAN_DURATION_SECONDS = 30;
+const SCAN_CAPTURE_INTERVAL_MS = 700;
 const LOCAL_REPORTS_KEY = "melomind_emotional_wellbeing_reports";
 
 function normalizeStepKey(step) {
@@ -619,9 +617,11 @@ function getDominantScanVote(votes) {
     return { emotion: "Neutral", emotionScore: 60 };
   }
 
-  const priority = ["Happy", "Neutral", "Stressed", "Depressed", "Sad", "Angry", "Frustrated"];
+  const priority = ["Happy", "Neutral", "Stressed"];
   const grouped = usableVotes.reduce((acc, vote) => {
-    const key = vote.emotion === "Depressed" ? "Stressed" : vote.emotion;
+    const key = ["Depressed", "Sad", "Angry", "Frustrated"].includes(vote.emotion)
+      ? "Stressed"
+      : vote.emotion;
     if (!acc[key]) acc[key] = { count: 0, total: 0 };
     acc[key].count += 1;
     acc[key].total += Number(vote.emotionScore) || 0;
@@ -1085,12 +1085,12 @@ export default function EmotionWellbeing() {
     const requestId = liveRequestRef.current + 1;
     liveRequestRef.current = requestId;
 
-    canvas.width = 320;
-    canvas.height = 240;
+    canvas.width = 640;
+    canvas.height = 480;
 
-    ctx.drawImage(video, 0, 0, 320, 240);
+    ctx.drawImage(video, 0, 0, 640, 480);
 
-    const base64Image = canvas.toDataURL("image/jpeg", 0.8);
+    const base64Image = canvas.toDataURL("image/jpeg", 0.92);
 
     try {
       const res = await fetch(apiUrl("/api/live_emotion"), {
@@ -1102,6 +1102,9 @@ export default function EmotionWellbeing() {
       });
 
       const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data?.message || "Emotion service is unavailable.");
+      }
       if (
         sessionId !== scanSessionRef.current ||
         !isScanningRef.current ||
@@ -1112,9 +1115,14 @@ export default function EmotionWellbeing() {
       }
       appliedLiveRequestRef.current = requestId;
 
-      // set scan result for UI
+      // Keep the live scan focused on the three report categories.
+      const nextEmotion = ["Happy", "Neutral", "Stressed"].includes(data.emotion)
+        ? data.emotion
+        : ["Depressed", "Sad", "Angry", "Frustrated"].includes(data.emotion)
+          ? "Stressed"
+          : "Neutral";
       const nextResult = {
-        emotion: data.emotion && data.emotion !== "No Face Detected" ? data.emotion : "Neutral",
+        emotion: nextEmotion,
         emotionScore: Math.round(Number(data.confidence) || 60),
         voiceSentiment: {
           tone: "Analyzing",
@@ -1131,10 +1139,11 @@ export default function EmotionWellbeing() {
     } catch (err) {
       console.error("Emotion detection error:", err);
       backendOfflineRef.current = true;
+      toast.error("Emotion scan backend is unavailable. Please restart the backend and try again.");
 
       const fallbackResult = {
-        emotion: "Neutral",
-        emotionScore: 60,
+        emotion: "Unavailable",
+        emotionScore: 0,
         voiceSentiment: {
           tone: "Analyzing",
           confidence: 0,
@@ -1213,7 +1222,11 @@ export default function EmotionWellbeing() {
       }
 
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
+        video: {
+          facingMode: "user",
+          width: { ideal: 640 },
+          height: { ideal: 480 },
+        },
         audio: true,
       });
 
@@ -1232,6 +1245,8 @@ export default function EmotionWellbeing() {
 
       const startTime = Date.now();
 
+      await detectEmotion();
+
       intervalRef.current = setInterval(() => {
 
         detectEmotion(); // send frame to DeepFace
@@ -1245,7 +1260,7 @@ export default function EmotionWellbeing() {
           stopScan();
         }
 
-      }, 1000);
+      }, SCAN_CAPTURE_INTERVAL_MS);
 
     } catch (err) {
       toast.error("Camera or microphone permission denied.");
@@ -1317,6 +1332,7 @@ export default function EmotionWellbeing() {
     setCountdown(SCAN_DURATION_SECONDS);
 
     const startTime = Date.now();
+    await detectEmotion();
     intervalRef.current = setInterval(() => {
       if (!videoRef.current || videoRef.current.paused || videoRef.current.ended) {
         stopScan();
@@ -1331,7 +1347,7 @@ export default function EmotionWellbeing() {
       if (elapsed >= SCAN_DURATION_SECONDS) {
         stopScan();
       }
-    }, 1000);
+    }, SCAN_CAPTURE_INTERVAL_MS);
 
     event.target.value = "";
   };

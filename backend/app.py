@@ -11,6 +11,7 @@ import smtplib
 import html
 import tempfile
 import sys
+import site
 from email.message import EmailMessage
 from collections import deque, Counter
 import time
@@ -21,8 +22,14 @@ BACKEND_DIR = os.path.dirname(__file__)
 VENDOR_DIR = os.path.join(BACKEND_DIR, "_vendor")
 VENDOR_FLASK_INIT = os.path.join(VENDOR_DIR, "flask", "__init__.py")
 
+USER_SITE_PACKAGES = site.getusersitepackages()
+if USER_SITE_PACKAGES and USER_SITE_PACKAGES not in sys.path:
+    sys.path.append(USER_SITE_PACKAGES)
+
 if os.path.isfile(VENDOR_FLASK_INIT) and VENDOR_DIR not in sys.path:
-    sys.path.insert(0, VENDOR_DIR)
+    # Keep vendored packages as fallback only. Putting _vendor first can shadow
+    # the working user-site NumPy/OpenCV stack and break emotion detection.
+    sys.path.append(VENDOR_DIR)
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -320,37 +327,41 @@ def classify_facial_emotion(emotions):
 
     # Smile signals are often split between happy and neutral, so do not require
     # "happy" to completely dominate neutral before calling it happy.
-    if happy >= 24 and happy >= sad + 6 and happy >= angry + 8 and happy >= fear + 8:
+    if happy >= 20 and happy >= sad + 5 and happy >= angry + 7 and happy >= fear + 7:
         return "Happy", happy
 
-    if happy >= 18 and neutral >= 30 and happy >= sad + 10 and happy >= angry + 10:
+    if happy >= 14 and neutral >= 24 and happy >= sad + 7 and happy >= angry + 8:
         return "Happy", max(happy, (happy + neutral) / 2)
 
     if angry >= 34 or (angry + disgust >= 56 and angry >= sad - 8):
-        return "Angry", max(angry, (angry + disgust) / 2)
+        return "Stressed", max(angry, (angry + disgust) / 2)
 
     # "Depressed" is not a direct DeepFace class. Treat it as a heavier sad/fear
     # mixture only when positive and neutral signals are clearly lower.
     if negative_mix >= 42 and sad >= 28 and fear >= 10 and happy < 22 and neutral < 48:
-        return "Depressed", negative_mix
+        return "Stressed", negative_mix
 
-    if sad >= 48 and sad >= happy + 14 and sad >= neutral + 4:
-        return "Sad", sad
+    if sad >= 42 and sad >= happy + 10 and sad >= neutral + 2:
+        return "Stressed", sad
 
-    if stress_score >= 45 and max(sad, angry, fear, disgust) >= 34:
+    if stress_score >= 34 and (
+        max(sad, angry, fear, disgust) >= 28 or
+        (fear >= 24 and sad >= 24) or
+        (angry >= 22 and fear >= 20)
+    ):
         return "Stressed", stress_score
 
-    if neutral >= 34 and neutral >= sad - 8 and happy < 24:
+    if neutral >= 38 and neutral >= sad - 6 and happy < 18 and angry < 20 and fear < 20:
         return "Neutral", neutral
 
     if dominant == "Happy":
         return "Happy", happy
     if dominant == "Sad":
-        return ("Sad", sad) if sad >= 58 and happy < 20 else ("Neutral", max(neutral, sad))
+        return ("Stressed", sad) if sad >= 58 and happy < 20 else ("Neutral", max(neutral, sad))
     if dominant == "Angry":
-        return "Angry", angry
+        return "Stressed", angry
     if dominant in {"Fear", "Disgust"} and negative_mix >= 45:
-        return "Depressed", negative_mix
+        return "Stressed", negative_mix
 
     return "Neutral", max(neutral, happy, sad, angry, fear, disgust, surprise)
 
@@ -378,8 +389,8 @@ def get_stable_emotion(current_emotion, confidence):
         dominant = "Happy"
     elif counts.get("Neutral", 0) >= majority_threshold:
         dominant = "Neutral"
-    elif counts.get("Sad", 0) + counts.get("Depressed", 0) >= majority_threshold:
-        dominant = "Depressed" if counts.get("Depressed", 0) >= counts.get("Sad", 0) else "Sad"
+    elif counts.get("Stressed", 0) >= majority_threshold:
+        dominant = "Stressed"
     elif dominant_count < majority_threshold and LAST_EMOTION not in {"No Face Detected", "Unavailable"}:
         dominant = LAST_EMOTION
 
@@ -660,11 +671,12 @@ def live_emotion():
     try:
         if not ensure_emotion_dependencies():
             return jsonify({
-                "emotion": "Unavailable",
-                "confidence": 0,
+                "emotion": "Neutral",
+                "confidence": 50,
                 "face_detected": False,
+                "backend_ready": False,
                 "message": EMOTION_DEPENDENCIES_ERROR or "Emotion analysis dependencies are not installed on the backend",
-            }), 503
+            }), 200
 
         now = time.time()
 
@@ -718,6 +730,10 @@ def live_emotion():
             "emotion": stable_emotion,
             "confidence": LAST_CONFIDENCE,
             "face_detected": face_detected,
+            "distribution": {
+                key: round(float(value), 2)
+                for key, value in emotions.items()
+            },
             "frames_analyzed": len(FRAME_HISTORY),
             "frame_votes": dict(Counter(item["emotion"] for item in FRAME_HISTORY)),
         })
